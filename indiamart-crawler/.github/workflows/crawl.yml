@@ -1,0 +1,75 @@
+name: IndiaMart crawler
+
+# Free-forever alternative to running this on a VM (Oracle/GCP). Same
+# crawler.py, same parser.py, same sheets_writer.py -- nothing about the
+# script changes, only how/where it's triggered, so the Sheet ends up
+# identical either way.
+#
+# IMPORTANT trade-offs before you rely on this (see README "GitHub Actions
+# deployment" for the full explanation):
+#   1. Free scheduled (cron) runs on GitHub Actions require a PUBLIC repo on
+#      a free personal account. That means crawler.py / parser.py /
+#      sheets_writer.py -- the LOGIC of this tool -- is visible to anyone.
+#      Your actual secrets (login session, service account key, Sheet ID)
+#      stay encrypted and are never exposed, but the approach itself
+#      ("crawl IndiaMart BuyLeads this way") would not be private. If that
+#      is not acceptable for a private repo, either pay for GitHub Pro
+#      ($4/mo, only cost) or use a free VM instead.
+#   2. GitHub auto-disables scheduled workflows after 60 days with no
+#      repository activity (commits). A cron-only repo can go quiet, so
+#      either check in on it periodically or push a trivial commit
+#      (e.g. bump a comment) every couple of months.
+#   3. `schedule` timing on GitHub Actions is best-effort -- under load,
+#      runs can lag by several minutes. Fine for this use case, but don't
+#      treat "every 20 minutes" as exact.
+
+on:
+  schedule:
+    # Every 20 minutes, all day -- same cadence as the VM crontab example
+    # in the README. GitHub Actions cron is always UTC.
+    - cron: "*/20 * * * *"
+  workflow_dispatch: {}  # lets you trigger a run manually from the Actions tab
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium (Playwright)
+        run: playwright install --with-deps chromium
+
+      - name: Write session + credentials from secrets
+        run: |
+          printf '%s' "$STORAGE_STATE_JSON" > storage_state.json
+          printf '%s' "$SERVICE_ACCOUNT_JSON" > service_account.json
+        env:
+          STORAGE_STATE_JSON: ${{ secrets.STORAGE_STATE_JSON }}
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+
+      - name: Run crawler
+        run: python crawler.py
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          STORAGE_STATE_PATH: ./storage_state.json
+          GOOGLE_SERVICE_ACCOUNT_JSON: ./service_account.json
+
+      # Runs even if the crawler step failed above, so you can always see
+      # why from the Actions tab instead of just a red X.
+      - name: Upload crawler.log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawler-log-${{ github.run_number }}
+          path: crawler.log
+          retention-days: 14

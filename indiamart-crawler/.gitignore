@@ -1,0 +1,7 @@
+.env
+storage_state.json
+service_account.json
+crawler.log*
+cron.log
+venv/
+__pycache__/
