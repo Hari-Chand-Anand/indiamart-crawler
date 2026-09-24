@@ -49,6 +49,18 @@ jobs:
       - name: Install Chromium (Playwright)
         run: playwright install --with-deps chromium
 
+      # IndiaMart's dashboard silently rejects a replayed login session when
+      # Chromium runs in true --headless mode (confirmed by testing: works
+      # logged in manually, works headed, fails only headless -- see
+      # crawler.py's module docstring). crawler.py therefore launches with
+      # headless=False, which needs an actual display to open a window
+      # against. GitHub's runners have no screen, so Xvfb provides a virtual
+      # one -- Chromium still thinks it's "headed" and behaves accordingly,
+      # nothing is ever visible to anyone, and nothing else about this step
+      # changes.
+      - name: Install Xvfb (virtual display for headed Chromium)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Write session + credentials from secrets
         run: |
           printf '%s' "$STORAGE_STATE_JSON" > storage_state.json
@@ -57,8 +69,8 @@ jobs:
           STORAGE_STATE_JSON: ${{ secrets.STORAGE_STATE_JSON }}
           SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
 
-      - name: Run crawler
-        run: python crawler.py
+      - name: Run crawler (under Xvfb -- see "Install Xvfb" step above)
+        run: xvfb-run -a python crawler.py
         env:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           STORAGE_STATE_PATH: ./storage_state.json

@@ -5,13 +5,44 @@ today's BuyLeads (India-wide) and any new Direct-source contacts from Lead
 Manager, and writes new rows into a Google Sheet — meant to run unattended on
 a schedule (cron), on a free-tier cloud VM.
 
-**Status: written from manual testing, not yet run end-to-end on a live VM.**
-Treat the first several runs as a validation pass — read `crawler.log`
-and spot-check the Sheet against the real IndiaMart pages before trusting
-this fully unattended. The BuyLeads text parser has been unit-tested against
-real captured page text; the Direct Leads (All Contacts table) parser has
-not been run against the live, virtualized table yet, and is the part most
-likely to need adjustment.
+**Status: confirmed working end-to-end on GitHub Actions (see below for the
+one important catch).** Still worth treating the first several days as a
+validation pass — read `crawler.log` occasionally and spot-check the Sheet
+against the real IndiaMart pages.
+
+## Important: this MUST run with a visible (headed) browser, even unattended
+
+Found this the hard way during setup, so it's worth explaining clearly:
+IndiaMart's seller dashboard silently rejects a replayed login session when
+Chromium runs in true `headless=True` mode. Confirmed by testing side by
+side on the same machine, same IP, same freshly-saved session:
+
+- Logged in manually → works.
+- Script running with a visible (`headless=False`) browser window → works.
+- Script running with `headless=True` (fully hidden) → IndiaMart serves
+  something that doesn't look logged in, both crawls abort with "Session
+  looks logged out," even though the session is completely valid.
+
+It's not a location/IP thing — this was confirmed locally on the same
+network the login happened on, and separately on GitHub's own servers,
+with the same result. It looks like a bot-detection signal specifically
+tied to headless Chromium's rendering path.
+
+**The fix:** `crawler.py` launches with `headless=False`, and on any
+server with no real screen, that requires a *virtual* display — `Xvfb`.
+This isn't a workaround bolted on top; it's a required part of running
+this unattended:
+- **GitHub Actions:** already wired up in `.github/workflows/crawl.yml` —
+  it installs `xvfb` and runs the crawler via `xvfb-run -a python crawler.py`.
+  Nothing to do here, it just works.
+- **VM path (Steps 3–6 below):** `sudo apt install -y xvfb` is included in
+  Step 4, and the crontab line in Step 6 uses `xvfb-run -a` — again, already
+  built into the instructions below, just don't drop the `xvfb-run -a`
+  prefix if you ever rewrite that cron line.
+- If you ever see "Session looks logged out" and you're confident the
+  session itself is fresh (just re-ran `save_session.py`), check first
+  whether whatever's running the crawler dropped the Xvfb wrapper — that's
+  now the most likely cause, more likely than an actually-expired session.
 
 ## What's intentionally left open
 
@@ -101,7 +132,7 @@ ssh ubuntu@<VM_PUBLIC_IP>
 cd indiamart-crawler
 
 sudo apt update
-sudo apt install -y python3-pip python3-venv
+sudo apt install -y python3-pip python3-venv xvfb
 python3 -m venv venv
 source venv/bin/activate
 
@@ -138,7 +169,7 @@ crontab -e
 Add (runs every 20 minutes):
 
 ```
-*/20 * * * * cd /home/ubuntu/indiamart-crawler && venv/bin/python3 crawler.py >> cron.log 2>&1
+*/20 * * * * cd /home/ubuntu/indiamart-crawler && xvfb-run -a venv/bin/python3 crawler.py >> cron.log 2>&1
 ```
 
 ## Alternative deployment: GitHub Actions (no VM at all)

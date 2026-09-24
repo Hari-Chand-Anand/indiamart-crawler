@@ -7,7 +7,13 @@ than a long-running loop, which is what "robust, doesn't break easily" calls
 for on an unattended VM.
 
 Flow per run:
-  1. Launch headless Chromium, load the saved login session (storage_state.json).
+  1. Launch Chromium in HEADED mode (headless=False) under a virtual display
+     (Xvfb on Linux -- see README/workflow), and load the saved login session
+     (storage_state.json). IndiaMart's dashboard was found to silently reject
+     a replayed session when Chromium runs in true --headless mode (works fine
+     manually logged in, works fine headed, fails only headless) -- likely a
+     bot-detection signal tied to headless Chromium's rendering path. Running
+     headed-but-invisible via Xvfb sidesteps that while still being unattended.
   2. Bail out loudly (non-zero exit, logged) if that session looks logged out --
      it will eventually expire and someone needs to re-run save_session.py.
   3. BuyLeads: set Location filter to India, Recent tab, refresh if IndiaMart
@@ -192,7 +198,11 @@ def main():
     sheets_writer.ensure_rep_mapping_tab(spreadsheet)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # headless=False is intentional, not a leftover from debugging -- see
+        # module docstring. On a server with no real display, this REQUIRES
+        # running under Xvfb (`xvfb-run -a python crawler.py`); see README and
+        # .github/workflows/crawl.yml for how that's wired up.
+        browser = p.chromium.launch(headless=False)
         context = browser.new_context(storage_state=storage_state_path)
         page = context.new_page()
 
